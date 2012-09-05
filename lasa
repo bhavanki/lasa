@@ -1,0 +1,249 @@
+#!/bin/bash
+#
+# lasa - system monitoring for the common user
+# Copyright 2012 Bill Havanki
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# ---
+#
+# This is lasa. It checks things on your system. Run it with -h for help, and
+# with -S to see its DSL syntax.
+#
+# You don't need root to use it. You *will* need to be able to run the following
+# standard utilities: df, grep, ntpstat, ps, sed, touch. For emailing reports,
+# you'll need a working mail command as well.
+
+log() {
+    [[ -n $verbose ]] && echo $1
+}
+debug() {
+    [[ -n $debug ]] && echo $1
+}
+
+fs_exists() {
+    debug "Checking if filesystem $1 exists"
+    ck1=$(df -k | grep -c "[ \t]\+${1}$")
+    debug $ck1
+    return $(( $ck1 != 1 ))
+}
+fs_usage() {
+    debug "Checking if filesystem $1 usage exceeds $2 %"
+    ck1=$(df -k | grep "[ \t]\+${1}$")
+    debug $ck1
+    if [[ -z $ck1 ]]; then
+        return 1
+    fi
+    ck2=$(echo ${ck1} | sed 's/^.*\s\+\([0-9]\+\)%.*/\1/g')
+    return $(( $ck2 > $2 ))
+}
+
+dir_exists() {
+    debug "Checking if directory $1 exists"
+    if [[ -d ${1} ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+dir_rw() {
+    debug "Checking if directory $1 is read-write"
+    touch ${1}/.lasa > /dev/null 2>&1
+    if [[ $? == 0 ]]; then
+        rm -f ${1}/.lasa
+        return 0
+    else
+        return 1
+    fi
+}
+
+file_exists() {
+    debug "Checking if file $1 exists"
+    if [[ -f ${1} ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+file_not_exists() {
+    debug "Checking if file $1 does not exists"
+    if [[ -f ${1} ]]; then
+        return 1
+    else
+        return 0
+    fi
+}
+
+daemon_exists() {
+    debug "Checking if daemon $1 is running"
+    ck1=$(ps -C ${1} --no-headers | wc -l)
+    debug $ck1
+    return $(( $ck1 < 1 ))
+}
+process_matches() {
+    debug "Checking if process matching \"$1\" is running"
+    ck1=$(ps -e -f --no-headers | grep "${1}" | grep -v grep | wc -l)
+    debug $ck1
+    return $(( $ck1 < 1 ))
+}
+
+time_ok() {
+    debug "Checking server time / NTP"
+    ntpstat > /dev/null 2>&1
+    return $?
+}
+
+check() {
+    cmd=$1
+    f=$2
+    if [[ $cmd =~ "fs exists " ]]; then
+        fs_exists $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "fs usage " ]]; then
+        fs_usage $(echo $cmd | cut -d ' ' -f 3) $(echo $cmd | cut -d ' ' -f 4)
+    elif [[ $cmd =~ "dir exists " ]]; then
+        dir_exists $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "dir readwrite " ]]; then
+        dir_rw $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "file exists " ]]; then
+        file_exists $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "file notexists " ]]; then
+        file_not_exists $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "daemon " ]]; then
+        daemon_exists $(echo $cmd | cut -d ' ' -f 2)
+    elif [[ $cmd =~ "process matches " ]]; then
+        process_matches $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "time ok" ]]; then
+        time_ok
+    else
+        echo "Unrecognized command in $(basename $f): $cmd"
+        exit 255
+    fi
+    return $?
+}
+
+usage() {
+    echo "Usage: $0 [options]"
+    echo "-c <dir> = read checks from <dir>"
+    echo "           default ${HOME}/.lasa.d"
+    echo "           use - for stdin"
+    echo "-d = debug output"
+    echo "-h = print help"
+    echo "-m <address> = send report via email if any check fails"
+    echo "-S = print DSL syntax and exit"
+    echo "-v = verbose (non-debug) output"
+}
+dsl_syntax() {
+    echo "command                    passes if..."
+    echo "-------                    ------------"
+    echo "daemon <name>              process with name <name> is running"
+    echo "dir exists <dir>           directory <dir> exists"
+    echo "dir readwrite <dir>        directory <dir> is read-write (touches a file)"
+    echo "file exists <file>         file <file> exists"
+    echo "file notexists <file>      file <file> does not exist"
+    echo "fs exists <mount>          filesystem is mounted at <mount>"
+    echo "fs usage <mount> <pctage>  filesystem is at or below <pctage> % usage"
+    echo "process matches <pattern>  process matching <pattern> is running"
+    echo "time ok                    server time is synchronized via NTP"
+}
+
+from="lasa@$(hostname)"
+
+send_report() {
+    subject="Lasa report for $(hostname) at $(date)"
+    msg="$1"
+    echo -e $msg | mail -s "$subject" -r "$from" $email_addr
+}
+
+conf_dir=$HOME/.lasa.d
+
+while getopts "c:m:dvSh" opt; do
+    case $opt in
+        c)
+            conf_dir=$OPTARG
+            ;;
+        d)
+            debug=TRUE
+            verbose=TRUE
+            ;;
+        m)
+            email_addr=$OPTARG
+            ;;
+        v)
+            verbose=TRUE
+            ;;
+        S)
+            dsl_syntax
+            exit 0
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+done
+if [[ $conf_dir != "-" && ! -d $conf_dir ]]; then
+    echo Configuration directory $conf_dir not found
+    usage
+    exit 1
+fi
+
+failure_ct=0
+total_ct=0
+report=
+if [[ $conf_dir == "-" ]]; then
+    while read cmd; do
+        check "$cmd" "stdin"
+        if [[ $? != 0 ]]; then
+            report="${report}X ${cmd}\n"
+            failure_ct=$(( failure_ct + 1 ))
+        else
+            if [[ -n $verbose ]]; then
+                report="${report}. ${cmd}\n"
+            fi
+        fi
+        total_ct=$(( total_ct + 1 ))
+    done
+else
+    for f in ${conf_dir}/*
+    do
+        if [[ $f =~ ".off" ]]; then
+            debug "Skipping $f"
+            continue
+        fi
+        cmd=$(cat $f)
+        check "$cmd" "$f"
+        if [[ $? != 0 ]]; then
+            report="${report}X ${cmd}\n"
+            failure_ct=$(( failure_ct + 1 ))
+        else
+            if [[ -n $verbose ]]; then
+                report="${report}. ${cmd}\n"
+            fi
+        fi
+        total_ct=$(( total_ct + 1 ))
+    done
+fi
+
+if [[ -z $email_addr ]]; then
+    echo -e -n "$report"
+else
+    if (( failure_ct > 0 )); then
+        send_report "$report"
+    fi
+fi
+
+log "Failures: $failure_ct"
+log "Total:    $total_ct"
+
+exit $failure_ct
