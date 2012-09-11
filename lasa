@@ -22,8 +22,8 @@
 # with -S to see its DSL syntax.
 #
 # You don't need root to use it. You *will* need to be able to run the following
-# standard utilities: df, grep, ntpstat, ps, sed, touch. For emailing reports,
-# you'll need a working mail command as well.
+# standard utilities: df, egrep, grep, netstat, ntpstat, ps, sed, touch. For
+# emailing reports, you'll need a working mail command as well.
 
 log() {
     [[ -n $verbose ]] && echo $1
@@ -91,6 +91,12 @@ daemon_exists() {
     debug $ck1
     return $(( $ck1 < 1 ))
 }
+listening() {
+    debug "Checking if a process is listening on port $1"
+    ck1=$(netstat -lnt | egrep " 0.0.0.0:${1} | :::${1} " | wc -l)
+    debug $ck1
+    return $(( $ck1 < 1 ))
+}
 process_matches() {
     debug "Checking if process matching \"$1\" is running"
     ck1=$(ps -e -f --no-headers | grep "${1}" | grep -v grep | wc -l)
@@ -125,6 +131,8 @@ check() {
         process_matches $(echo $cmd | cut -d ' ' -f 3)
     elif [[ $cmd =~ "time ok" ]]; then
         time_ok
+    elif [[ $cmd =~ "listening " ]]; then
+        listening $(echo $cmd | cut -d ' ' -f 2)
     else
         echo "Unrecognized command in $(basename $f): $cmd"
         exit 255
@@ -153,6 +161,7 @@ dsl_syntax() {
     echo "file notexists <file>      file <file> does not exist"
     echo "fs exists <mount>          filesystem is mounted at <mount>"
     echo "fs usage <mount> <pctage>  filesystem is at or below <pctage> % usage"
+    echo "listening <port>           process listening on port <port>"
     echo "process matches <pattern>  process matching <pattern> is running"
     echo "time ok                    server time is synchronized via NTP"
 }
