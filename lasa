@@ -22,8 +22,8 @@
 # with -S to see its DSL syntax.
 #
 # You don't need root to use it. You *will* need to be able to run the following
-# standard utilities: df, egrep, grep, netstat, ntpstat, ps, sed, touch. For
-# emailing reports, you'll need a working mail command as well.
+# standard utilities: df, egrep, grep, netstat, ntpstat, ps, sed, stat, touch.
+# For emailing reports, you'll need a working mail command as well.
 
 log() {
     [[ -n $verbose ]] && echo $1
@@ -36,7 +36,7 @@ fs_exists() {
     debug "Checking if filesystem $1 exists"
     ck1=$(df -k | grep -c "[ \t]\+${1}$")
     debug $ck1
-    return $(( $ck1 != 1 ))
+    return $(( ck1 != 1 ))
 }
 fs_usage() {
     debug "Checking if filesystem $1 usage exceeds $2 %"
@@ -46,7 +46,7 @@ fs_usage() {
         return 1
     fi
     ck2=$(echo ${ck1} | sed 's/^.*\s\+\([0-9]\+\)%.*/\1/g')
-    return $(( $ck2 > $2 ))
+    return $(( ck2 > $2 ))
 }
 
 dir_exists() {
@@ -84,24 +84,33 @@ file_not_exists() {
         return 0
     fi
 }
+file_size() {
+    debug "Checking if file $1 has size $2"
+    if [[ ! -f ${1} ]]; then
+        return 1
+    fi
+    ck1=$(stat -c "%s" ${1})
+    debug $ck1
+    return $(( ck1 != ${2} ))
+}
 
 daemon_exists() {
     debug "Checking if daemon $1 is running"
     ck1=$(ps -C ${1} --no-headers | wc -l)
     debug $ck1
-    return $(( $ck1 < 1 ))
+    return $(( ck1 < 1 ))
 }
 listening() {
     debug "Checking if a process is listening on port $1"
     ck1=$(netstat -lnt | egrep " 0.0.0.0:${1} | :::${1} " | wc -l)
     debug $ck1
-    return $(( $ck1 < 1 ))
+    return $(( ck1 < 1 ))
 }
 process_matches() {
     debug "Checking if process matching \"$1\" is running"
     ck1=$(ps -e -f --no-headers | grep "${1}" | grep -v grep | wc -l)
     debug $ck1
-    return $(( $ck1 < 1 ))
+    return $(( ck1 < 1 ))
 }
 
 time_ok() {
@@ -125,6 +134,8 @@ check() {
         file_exists $(echo $cmd | cut -d ' ' -f 3)
     elif [[ $cmd =~ "file notexists " ]]; then
         file_not_exists $(echo $cmd | cut -d ' ' -f 3)
+    elif [[ $cmd =~ "file size " ]]; then
+        file_size $(echo $cmd | cut -d ' ' -f 3) $(echo $cmd | cut -d ' ' -f 4)
     elif [[ $cmd =~ "daemon " ]]; then
         daemon_exists $(echo $cmd | cut -d ' ' -f 2)
     elif [[ $cmd =~ "process matches " ]]; then
@@ -159,6 +170,7 @@ dsl_syntax() {
     echo "dir readwrite <dir>        directory <dir> is read-write (touches a file)"
     echo "file exists <file>         file <file> exists"
     echo "file notexists <file>      file <file> does not exist"
+    echo "file size <file> <size>    file <file> is size <size> in bytes"
     echo "fs exists <mount>          filesystem is mounted at <mount>"
     echo "fs usage <mount> <pctage>  filesystem is at or below <pctage> % usage"
     echo "listening <port>           process listening on port <port>"
