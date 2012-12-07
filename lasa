@@ -108,7 +108,7 @@ listening() {
 }
 process_matches() {
     debug "Checking if process matching \"$1\" is running"
-    ck1=$(ps -e -f --no-headers | grep "${1}" | grep -v grep | wc -l)
+    ck1=$(ps -e -f --no-headers | grep -- "${1}" | grep -v grep | wc -l)
     debug $ck1
     return $(( ck1 < 1 ))
 }
