@@ -43,7 +43,6 @@ Some examples:
     daemon httpd
     file exists /etc/something.conf
 
-Put one check per file in your configuration directory. Naming a file with the
-suffix ".off" will turn it off, i.e., get it skipped.
-
-
+Put one check per line in each file in your configuration directory. Lines
+starting with #, empty lines, and blank lines are skipped. Naming a file with
+the suffix ".off" will turn it off, i.e., get it skipped.
